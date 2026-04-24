@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- build: 1777066609 -->
+<!-- build: 1777067529 -->
 <html lang="es">
 <head>
 <meta charset="utf-8">
@@ -122,12 +122,13 @@ async function innerInitializeProtocol() {
   });
 }
 async function innerInitializeRegistry() {
-  const disc = await anchorDiscriminator("initialize_allowed_mint_registry");
+  const disc = await anchorDiscriminator("init_allowed_mint_registry");
   return new TransactionInstruction({
     programId: WAGON,
     keys: [
-      { pubkey: SQUADS_VAULT, isSigner: true,  isWritable: true },
-      { pubkey: REGISTRY_PDA, isSigner: false, isWritable: true },
+      { pubkey: SQUADS_VAULT, isSigner: true,  isWritable: true },   // authority
+      { pubkey: PROTOCOL_PDA, isSigner: false, isWritable: false },  // protocol (has_one check)
+      { pubkey: REGISTRY_PDA, isSigner: false, isWritable: true },   // registry (init)
       { pubkey: SYSTEM_PROG,  isSigner: false, isWritable: false },
     ],
     data: Buffer.from(disc),
