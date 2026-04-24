@@ -73,6 +73,11 @@
 </div>
 
 <script type="module">
+// Browser polyfill for Node.js Buffer (required by @solana/web3.js)
+import { Buffer } from "https://esm.sh/buffer@6.0.3";
+window.Buffer = Buffer;
+globalThis.Buffer = Buffer;
+
 // Load dependencies from esm.sh
 const web3 = await import("https://esm.sh/@solana/web3.js@1.95.3");
 const multisig = await import("https://esm.sh/@sqds/multisig@2.1.3");
