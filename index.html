@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- build: 1777067529 -->
+<!-- build: 1777168552 -->
 <html lang="es">
 <head>
 <meta charset="utf-8">
@@ -64,7 +64,41 @@
 </div>
 
 <div class="section">
-  <h3>Siguientes pasos (después de ambos proposals)</h3>
+  <h3>Proposal #3 — Program upgrade</h3>
+  <div class="muted">Reemplaza el binario del programa Wagon con el contenido del Buffer indicado.
+    El Buffer lo crea el workflow <code>upgrade-mainnet.yml</code> con la nueva <code>wagon.so</code>
+    y su autoridad ya es el Squads vault.</div>
+  <div style="margin-top:12px">
+    <label style="display:block; font-size:12px; color:#888; margin-bottom:4px">Buffer pubkey:</label>
+    <input id="buffer-pubkey" type="text" placeholder="ej. 5nA4...zGkH (sale en el log del workflow)"
+      style="width:100%; padding:10px; background:#0a0a0a; border:1px solid #2a2a2a; border-radius:6px; color:#eee; font-family:'SF Mono',Menlo,monospace; font-size:12px;" />
+  </div>
+  <button class="proposal-btn" id="btn-3" disabled>Proponer program upgrade</button>
+  <div id="status-3" class="status" style="display:none"></div>
+</div>
+
+<div class="section">
+  <h3>Add allowed mint (cualquier mint, después de init_registry)</h3>
+  <div class="muted">Whitelist una mint en el registry. Para USDC mainnet usa
+    <code>EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v</code> con categoría <b>Stable</b>.</div>
+  <div style="margin-top:12px">
+    <label style="display:block; font-size:12px; color:#888; margin-bottom:4px">Mint pubkey:</label>
+    <input id="mint-pubkey" type="text" placeholder="EPjFWdd5..."
+      style="width:100%; padding:10px; background:#0a0a0a; border:1px solid #2a2a2a; border-radius:6px; color:#eee; font-family:'SF Mono',Menlo,monospace; font-size:12px;" />
+    <label style="display:block; font-size:12px; color:#888; margin:10px 0 4px 0">Category:</label>
+    <select id="mint-category" style="width:100%; padding:10px; background:#0a0a0a; border:1px solid #2a2a2a; border-radius:6px; color:#eee;">
+      <option value="0">Spot — SOL/wBTC/wETH/memes</option>
+      <option value="1" selected>Stable — USDC/USDT/PYUSD</option>
+      <option value="2">XStock — Backed equities</option>
+      <option value="3">Rwa — RWA tokens</option>
+    </select>
+  </div>
+  <button class="proposal-btn" id="btn-4" disabled>Proponer add_allowed_mint</button>
+  <div id="status-4" class="status" style="display:none"></div>
+</div>
+
+<div class="section">
+  <h3>Siguientes pasos (después de cualquiera de las proposals)</h3>
   <div class="muted">
     1. Cada proposal aparece en <a href="https://app.squads.so/squads/6YdqoAnM3498uyycJcSA7Pq2SXLrTk8UUB6L5voXnVyN/transactions" target="_blank">Squads → Transactions</a> pending.<br>
     2. <b>Approve</b> desde una 2ª wallet (necesitas 2 de 3 votos).<br>
@@ -91,6 +125,9 @@ const MULTISIG      = new PublicKey("Dz2NmP6CdQRcPVW5fktUYGSaHNMb46KbCK6svMB7Zo9
 const SQUADS_VAULT  = new PublicKey("6YdqoAnM3498uyycJcSA7Pq2SXLrTk8UUB6L5voXnVyN");
 const WAGON         = new PublicKey("2kZqCjGfKgVR8dUkv4PCogFsFgN3EoSSNX41HN1cBfBA");
 const USDC_MINT     = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+const BPF_LOADER    = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
+const RENT_SYSVAR   = new PublicKey("SysvarRent111111111111111111111111111111111");
+const CLOCK_SYSVAR  = new PublicKey("SysvarC1ock11111111111111111111111111111111");
 const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const ATA_PROGRAM   = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 const SYSTEM_PROG   = SystemProgram.programId;
@@ -135,6 +172,61 @@ async function innerInitializeRegistry() {
   });
 }
 
+// ---- BPF loader Upgrade ix (NOT Anchor — uses u32 LE discriminant) ------
+function buildUpgradeIx(bufferPubkey) {
+  const [programDataPda] = PublicKey.findProgramAddressSync(
+    [WAGON.toBuffer()],
+    BPF_LOADER,
+  );
+  const data = Buffer.from([3, 0, 0, 0]); // u32 LE = 3 (Upgrade variant)
+  return new TransactionInstruction({
+    programId: BPF_LOADER,
+    keys: [
+      { pubkey: programDataPda, isSigner: false, isWritable: true  }, // 0 programdata
+      { pubkey: WAGON,          isSigner: false, isWritable: true  }, // 1 program
+      { pubkey: bufferPubkey,   isSigner: false, isWritable: true  }, // 2 buffer
+      { pubkey: SQUADS_VAULT,   isSigner: false, isWritable: true  }, // 3 spill (refund)
+      { pubkey: RENT_SYSVAR,    isSigner: false, isWritable: false }, // 4
+      { pubkey: CLOCK_SYSVAR,   isSigner: false, isWritable: false }, // 5
+      { pubkey: SQUADS_VAULT,   isSigner: true,  isWritable: false }, // 6 authority
+    ],
+    data,
+  });
+}
+
+async function innerProgramUpgrade() {
+  const raw = (document.getElementById("buffer-pubkey").value || "").trim();
+  if (!raw) throw new Error("Pega la pubkey del Buffer en el campo de arriba.");
+  let bufferPk;
+  try { bufferPk = new PublicKey(raw); } catch (e) { throw new Error("Pubkey inválido: " + raw); }
+  return buildUpgradeIx(bufferPk);
+}
+
+// ---- add_allowed_mint ix ------------------------------------------------
+async function innerAddAllowedMint() {
+  const rawMint = (document.getElementById("mint-pubkey").value || "").trim();
+  if (!rawMint) throw new Error("Pega la pubkey de la mint a whitelistear.");
+  let mintPk;
+  try { mintPk = new PublicKey(rawMint); } catch (e) { throw new Error("Pubkey inválido: " + rawMint); }
+  const cat = parseInt(document.getElementById("mint-category").value, 10);
+  if (![0,1,2,3].includes(cat)) throw new Error("Categoría inválida");
+
+  const disc = await anchorDiscriminator("add_allowed_mint");
+  const data = new Uint8Array(8 + 32 + 1);
+  data.set(disc, 0);
+  data.set(mintPk.toBytes(), 8);
+  data[40] = cat;
+
+  return new TransactionInstruction({
+    programId: WAGON,
+    keys: [
+      { pubkey: SQUADS_VAULT, isSigner: true,  isWritable: false },
+      { pubkey: REGISTRY_PDA, isSigner: false, isWritable: true  },
+    ],
+    data: Buffer.from(data),
+  });
+}
+
 // --- UI wiring ---
 const connection = new Connection(RPC, "confirmed");
 let wallet = null;
@@ -157,6 +249,8 @@ async function connectPhantom() {
   document.getElementById("wallet-status").innerHTML = `🟢 Conectado: <span class="addr">${wallet.pk.toBase58()}</span>`;
   document.getElementById("btn-1").disabled = false;
   document.getElementById("btn-2").disabled = false;
+  document.getElementById("btn-3").disabled = false;
+  document.getElementById("btn-4").disabled = false;
   document.getElementById("connect-btn").textContent = "Reconectar";
 }
 
@@ -243,6 +337,8 @@ async function proposeTx(label, buildInner, btnId, logId) {
 document.getElementById("connect-btn").onclick = connectPhantom;
 document.getElementById("btn-1").onclick = () => proposeTx("init_protocol", innerInitializeProtocol, "btn-1", "status-1");
 document.getElementById("btn-2").onclick = () => proposeTx("init_registry", innerInitializeRegistry, "btn-2", "status-2");
+document.getElementById("btn-3").onclick = () => proposeTx("program_upgrade", innerProgramUpgrade, "btn-3", "status-3");
+document.getElementById("btn-4").onclick = () => proposeTx("add_allowed_mint", innerAddAllowedMint, "btn-4", "status-4");
 
 // SDK ready
 document.getElementById("wallet-status").textContent = "🔴 Wallet desconectada (Squads SDK cargado ✓)";
@@ -257,6 +353,8 @@ try {
     document.getElementById("wallet-status").innerHTML = `🟢 Conectado: <span class="addr">${wallet.pk.toBase58()}</span>`;
     document.getElementById("btn-1").disabled = false;
     document.getElementById("btn-2").disabled = false;
+    document.getElementById("btn-3").disabled = false;
+    document.getElementById("btn-4").disabled = false;
   }
 } catch(e){}
 </script>
