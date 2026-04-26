@@ -117,6 +117,24 @@
 </div>
 
 <div class="section">
+  <h3>6. Extender ProgramData (antes de un program upgrade que crece el binario)</h3>
+  <div class="muted">
+    BPFLoader Upgrade ix copia el buffer al ProgramData. Si el binario nuevo
+    es más grande que el ProgramData actual, falla con
+    <code>AccountDataTooSmall</code>. Esta proposal extiende ProgramData en
+    N bytes (default 32768 = 32 KB de margen para varios upgrades futuros).
+    Coste: ~0.23 SOL de rent extra, pagado por el executor.
+  </div>
+  <div style="margin-top:10px">
+    <label style="display:block; font-size:12px; color:#888; margin-bottom:4px">Bytes adicionales:</label>
+    <input id="extend-bytes" type="number" value="32768" min="1024" step="1024"
+      style="width:100%; padding:10px; background:#0a0a0a; border:1px solid #2a2a2a; border-radius:6px; color:#eee; font-family:'SF Mono',Menlo,monospace; font-size:12px;" />
+  </div>
+  <button class="proposal-btn" id="btn-6" disabled>Proponer vault_extend_program</button>
+  <div id="status-6" class="status" style="display:none"></div>
+</div>
+
+<div class="section">
   <h3>Siguientes pasos (después de cualquiera de las proposals)</h3>
   <div class="muted">
     1. Cada proposal aparece en <a href="https://app.squads.so/squads/6YdqoAnM3498uyycJcSA7Pq2SXLrTk8UUB6L5voXnVyN/transactions" target="_blank">Squads → Transactions</a> pending.<br>
@@ -265,6 +283,46 @@ async function innerVaultSendSol() {
   });
 }
 
+// ---- BPFLoader ExtendProgram ix -----------------------------------------
+// Discriminator: u32 LE = 6 (variant index in UpgradeableLoaderInstruction)
+// Followed by additional_bytes: u32 LE
+//
+// Accounts (per solana-sdk bpf_loader_upgradeable):
+//   0. [writable] ProgramData
+//   1. [writable] Program
+//   2. [optional] System Program (only if rent payment is needed — yes for non-zero bytes)
+//   3. [optional, writable, signer] Payer for additional rent
+//
+// We pass the Squads vault as payer signer (its lamports cover the rent).
+// No upgrade authority signature required for ExtendProgram (Solana 1.16+).
+async function innerVaultExtendProgram() {
+  const additionalBytes = parseInt(document.getElementById("extend-bytes").value, 10);
+  if (!Number.isFinite(additionalBytes) || additionalBytes < 1) {
+    throw new Error("Bytes a extender inválido");
+  }
+
+  const [programDataPda] = PublicKey.findProgramAddressSync(
+    [WAGON.toBuffer()],
+    BPF_LOADER,
+  );
+
+  // Build instruction data: [variant=6 LE u32][additional_bytes LE u32] = 8 bytes
+  const data = Buffer.alloc(8);
+  data.writeUInt32LE(6, 0);                   // variant
+  data.writeUInt32LE(additionalBytes, 4);     // additional_bytes
+
+  return new TransactionInstruction({
+    programId: BPF_LOADER,
+    keys: [
+      { pubkey: programDataPda, isSigner: false, isWritable: true },  // 0 programdata
+      { pubkey: WAGON,          isSigner: false, isWritable: true },  // 1 program
+      { pubkey: SYSTEM_PROG,    isSigner: false, isWritable: false }, // 2 system program
+      { pubkey: SQUADS_VAULT,   isSigner: true,  isWritable: true },  // 3 payer (vault)
+    ],
+    data,
+  });
+}
+
 // --- UI wiring ---
 const connection = new Connection(RPC, "confirmed");
 let wallet = null;
@@ -290,6 +348,7 @@ async function connectPhantom() {
   document.getElementById("btn-3").disabled = false;
   document.getElementById("btn-4").disabled = false;
   document.getElementById("btn-5").disabled = false;
+  document.getElementById("btn-6").disabled = false;
   document.getElementById("connect-btn").textContent = "Reconectar";
 }
 
@@ -379,6 +438,7 @@ document.getElementById("btn-2").onclick = () => proposeTx("init_registry", inne
 document.getElementById("btn-3").onclick = () => proposeTx("program_upgrade", innerProgramUpgrade, "btn-3", "status-3");
 document.getElementById("btn-4").onclick = () => proposeTx("add_allowed_mint", innerAddAllowedMint, "btn-4", "status-4");
 document.getElementById("btn-5").onclick = () => proposeTx("vault_send_sol", innerVaultSendSol, "btn-5", "status-5");
+document.getElementById("btn-6").onclick = () => proposeTx("vault_extend_program", innerVaultExtendProgram, "btn-6", "status-6");
 
 // SDK ready
 document.getElementById("wallet-status").textContent = "🔴 Wallet desconectada (Squads SDK cargado ✓)";
@@ -396,6 +456,7 @@ try {
     document.getElementById("btn-3").disabled = false;
     document.getElementById("btn-4").disabled = false;
     document.getElementById("btn-5").disabled = false;
+    document.getElementById("btn-6").disabled = false;
   }
 } catch(e){}
 </script>
